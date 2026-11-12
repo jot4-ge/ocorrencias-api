@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query 
+from schemas import OcorrenciaCreate, OcorrenciaResponse, OcorrenciaUpdate
 
 app = FastAPI(title="API de Ocorrências")
 
@@ -10,7 +11,7 @@ ocorrencias = [
 ]
 
 
-@app.get("/ocorrencias")
+@app.get("/ocorrencias", response_model=list[OcorrenciaResponse])
 def listar(
     rodovia: str | None = None,
     tipo: str | None = None,
@@ -27,8 +28,8 @@ def listar(
 def total():
     return {"total": len(ocorrencias)}
 
-@app.get("/ocorrencias/{ocorrencia_id}")
-def buscar(ocorrencia_id: int):
+@app.get("/ocorrencias/{ocorrencia_id}", response_model=OcorrenciaResponse)
+def buscar(ocorrencia_id: int):  
     for o in ocorrencias:
         if o["id"] == ocorrencia_id:
             return o
@@ -41,4 +42,20 @@ def deletar(ocorrencia_id: int):
         if o["id"] == ocorrencia_id:
             ocorrencias.pop(i)
             return
+    raise HTTPException(status_code=404, detail="Ocorrência não encontrada")
+
+@app.post("/ocorrencias", response_model=OcorrenciaResponse, status_code=201)
+def criar(dados: OcorrenciaCreate):
+    novo_id = max((o["id"] for o in ocorrencias), default=0) + 1
+    nova = {"id": novo_id, **dados.model_dump()}
+    ocorrencias.append(nova)
+    return nova
+
+
+@app.patch("/ocorrencias/{ocorrencia_id}", response_model=OcorrenciaResponse)
+def atualizar_parcial(ocorrencia_id: int, dados: OcorrenciaUpdate):
+    for o in ocorrencias:
+        if o["id"] == ocorrencia_id:
+            o.update(dados.model_dump(exclude_unset=True))
+            return o
     raise HTTPException(status_code=404, detail="Ocorrência não encontrada")
