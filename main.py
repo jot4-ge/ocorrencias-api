@@ -1,14 +1,21 @@
-from fastapi import FastAPI, HTTPException, Query 
+from fastapi import Depends, FastAPI, HTTPException, Query
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+import models
+from database import Base, engine, get_db
 from schemas import OcorrenciaCreate, OcorrenciaResponse, OcorrenciaUpdate
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="API de Ocorrências")
 
-# "Banco" em memória, só por hoje
-ocorrencias = [
-    {"id": 1, "rodovia": "BR-040", "tipo": "acidente", "km": 12},
-    {"id": 2, "rodovia": "BR-060", "tipo": "buraco", "km": 87},
-    {"id": 3, "rodovia": "BR-040", "tipo": "alagamento", "km": 45},
-]
+
+def buscar_ou_404(db: Session, ocorrencia_id: int) -> models.Ocorrencia:
+    obj = db.get(models.Ocorrencia, ocorrencia_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Ocorrência não encontrada")
+    return obj
 
 
 @app.get("/ocorrencias", response_model=list[OcorrenciaResponse])
@@ -16,46 +23,58 @@ def listar(
     rodovia: str | None = None,
     tipo: str | None = None,
     limite: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
 ):
-    resultado = ocorrencias
+    stmt = select(models.Ocorrencia)
     if rodovia:
-        resultado = [o for o in resultado if o["rodovia"] == rodovia]
+        stmt = stmt.where(models.Ocorrencia.rodovia == rodovia)
     if tipo:
-        resultado = [o for o in resultado if o["tipo"] == tipo]
-    return resultado[:limite]
+        stmt = stmt.where(models.Ocorrencia.tipo == tipo)
+    stmt = stmt.order_by(models.Ocorrencia.id).limit(limite)
+    return db.scalars(stmt).all()
+
 
 @app.get("/ocorrencias/total")
-def total():
-    return {"total": len(ocorrencias)}
+def total(db: Session = Depends(get_db)):
+    return {"total": db.scalar(select(func.count()).select_from(models.Ocorrencia))}
+
 
 @app.get("/ocorrencias/{ocorrencia_id}", response_model=OcorrenciaResponse)
-def buscar(ocorrencia_id: int):  
-    for o in ocorrencias:
-        if o["id"] == ocorrencia_id:
-            return o
-    raise HTTPException(status_code=404, detail="Ocorrência não encontrada")
+def buscar(ocorrencia_id: int, db: Session = Depends(get_db)):
+    return buscar_ou_404(db, ocorrencia_id)
 
-
-@app.delete("/ocorrencias/{ocorrencia_id}", status_code=204)
-def deletar(ocorrencia_id: int):
-    for i, o in enumerate(ocorrencias):
-        if o["id"] == ocorrencia_id:
-            ocorrencias.pop(i)
-            return
-    raise HTTPException(status_code=404, detail="Ocorrência não encontrada")
 
 @app.post("/ocorrencias", response_model=OcorrenciaResponse, status_code=201)
-def criar(dados: OcorrenciaCreate):
-    novo_id = max((o["id"] for o in ocorrencias), default=0) + 1
-    nova = {"id": novo_id, **dados.model_dump()}
-    ocorrencias.append(nova)
-    return nova
+def criar(dados: OcorrenciaCreate, db: Session = Depends(get_db)):
+    obj = models.Ocorrencia(**dados.model_dump())
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@app.put("/ocorrencias/{ocorrencia_id}", response_model=OcorrenciaResponse)
+def atualizar(ocorrencia_id: int, dados: OcorrenciaCreate, db: Session = Depends(get_db)):
+    obj = buscar_ou_404(db, ocorrencia_id)
+    for campo, valor in dados.model_dump().items():
+        setattr(obj, campo, valor)
+    db.commit()
+    db.refresh(obj)
+    return obj
 
 
 @app.patch("/ocorrencias/{ocorrencia_id}", response_model=OcorrenciaResponse)
-def atualizar_parcial(ocorrencia_id: int, dados: OcorrenciaUpdate):
-    for o in ocorrencias:
-        if o["id"] == ocorrencia_id:
-            o.update(dados.model_dump(exclude_unset=True))
-            return o
-    raise HTTPException(status_code=404, detail="Ocorrência não encontrada")
+def atualizar_parcial(ocorrencia_id: int, dados: OcorrenciaUpdate, db: Session = Depends(get_db)):
+    obj = buscar_ou_404(db, ocorrencia_id)
+    for campo, valor in dados.model_dump(exclude_unset=True).items():
+        setattr(obj, campo, valor)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@app.delete("/ocorrencias/{ocorrencia_id}", status_code=204)
+def deletar(ocorrencia_id: int, db: Session = Depends(get_db)):
+    obj = buscar_ou_404(db, ocorrencia_id)
+    db.delete(obj)
+    db.commit()
