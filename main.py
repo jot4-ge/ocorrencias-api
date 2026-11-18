@@ -1,4 +1,7 @@
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -6,9 +9,21 @@ import models
 from database import Base, engine, get_db
 from schemas import OcorrenciaCreate, OcorrenciaResponse, OcorrenciaUpdate
 
-Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="API de Ocorrências")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(title="API de Ocorrências", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def buscar_ou_404(db: Session, ocorrencia_id: int) -> models.Ocorrencia:
@@ -34,9 +49,16 @@ def listar(
     return db.scalars(stmt).all()
 
 
+# Rotas fixas ANTES de /ocorrencias/{ocorrencia_id}
 @app.get("/ocorrencias/total")
 def total(db: Session = Depends(get_db)):
     return {"total": db.scalar(select(func.count()).select_from(models.Ocorrencia))}
+
+
+@app.get("/ocorrencias/por-tipo")
+def por_tipo(db: Session = Depends(get_db)):
+    stmt = select(models.Ocorrencia.tipo, func.count()).group_by(models.Ocorrencia.tipo)
+    return {tipo: qtd for tipo, qtd in db.execute(stmt).all()}
 
 
 @app.get("/ocorrencias/{ocorrencia_id}", response_model=OcorrenciaResponse)
