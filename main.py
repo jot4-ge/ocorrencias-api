@@ -1,6 +1,7 @@
 from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from fastapi.middleware.cors import CORSMiddleware
 
 import models
 from database import Base, engine, get_db
@@ -9,7 +10,12 @@ from schemas import OcorrenciaCreate, OcorrenciaResponse, OcorrenciaUpdate
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="API de Ocorrências")
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def buscar_ou_404(db: Session, ocorrencia_id: int) -> models.Ocorrencia:
     obj = db.get(models.Ocorrencia, ocorrencia_id)
